@@ -140,7 +140,11 @@ class ClientMcpAsyncHandlersRegistryTests {
 		registry.postProcessBeanFactory(beanFactory);
 		registry.afterSingletonsInstantiated();
 
-		var request = McpSchema.ElicitRequest.builder().message("Elicit request").progressToken("token-12345").build();
+		var request = McpSchema.ElicitRequest.builder()
+			.message("Elicit request")
+			.requestedSchema(Map.of("type", "string"))
+			.progressToken("token-12345")
+			.build();
 		var response = registry.handleElicitation("client-1", request).block();
 
 		assertThat(response).isNotNull();
@@ -159,7 +163,11 @@ class ClientMcpAsyncHandlersRegistryTests {
 		registry.postProcessBeanFactory(beanFactory);
 		registry.afterSingletonsInstantiated();
 
-		var request = McpSchema.ElicitRequest.builder().message("Elicit request").progressToken("token-12345").build();
+		var request = McpSchema.ElicitRequest.builder()
+			.message("Elicit request")
+			.requestedSchema(Map.of("type", "string"))
+			.progressToken("token-12345")
+			.build();
 		assertThatThrownBy(() -> registry.handleElicitation("client-unknown", request).block())
 			.hasMessage("Elicitation not supported")
 			.asInstanceOf(type(McpError.class))
@@ -181,6 +189,7 @@ class ClientMcpAsyncHandlersRegistryTests {
 		var request = McpSchema.CreateMessageRequest.builder()
 			.messages(List
 				.of(new McpSchema.SamplingMessage(McpSchema.Role.USER, new McpSchema.TextContent("Tell a joke"))))
+			.maxTokens(100)
 			.build();
 		var response = registry.handleSampling("client-1", request).block();
 
@@ -204,6 +213,7 @@ class ClientMcpAsyncHandlersRegistryTests {
 		var request = McpSchema.CreateMessageRequest.builder()
 			.messages(List
 				.of(new McpSchema.SamplingMessage(McpSchema.Role.USER, new McpSchema.TextContent("Tell a joke"))))
+			.maxTokens(100)
 			.build();
 		assertThatThrownBy(() -> registry.handleSampling("client-unknown", request).block())
 			.hasMessage("Sampling not supported")
