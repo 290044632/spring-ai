@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
@@ -51,8 +52,10 @@ import org.springframework.ai.mcp.annotation.McpProgressToken;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.ai.mcp.annotation.context.McpAsyncRequestContext;
 import org.springframework.ai.mcp.annotation.context.McpSyncRequestContext;
+import org.springframework.ai.model.KotlinModule;
 import org.springframework.ai.util.json.JsonParser;
 import org.springframework.ai.util.json.schema.JsonSchemaGenerator.SchemaOption;
+import org.springframework.core.KotlinDetector;
 import org.springframework.core.Nullness;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.ConcurrentReferenceHashMap;
@@ -85,16 +88,21 @@ public final class McpJsonSchemaGenerator {
 		Module springAiSchemaModule = PROPERTY_REQUIRED_BY_DEFAULT ? new McpSpringAiSchemaModule()
 				: new McpSpringAiSchemaModule(McpSpringAiSchemaModule.Option.PROPERTY_REQUIRED_FALSE_BY_DEFAULT);
 
-		SchemaGeneratorConfig subtypeConfig = new SchemaGeneratorConfigBuilder(SchemaVersion.DRAFT_2020_12,
-				OptionPreset.PLAIN_JSON)
+		SchemaGeneratorConfigBuilder subtypeConfigBuilder = new SchemaGeneratorConfigBuilder(
+				SchemaVersion.DRAFT_2020_12, OptionPreset.PLAIN_JSON)
 			.with(jacksonModule)
 			.with(openApiModule)
 			.with(springAiSchemaModule)
 			.with(Option.EXTRA_OPEN_API_FORMAT_VALUES)
 			.with(Option.STANDARD_FORMATS)
 			.with(Option.PLAIN_DEFINITION_KEYS)
-			.without(Option.SCHEMA_VERSION_INDICATOR)
-			.build();
+			.without(Option.SCHEMA_VERSION_INDICATOR);
+
+		if (KotlinDetector.isKotlinReflectPresent()) {
+			subtypeConfigBuilder.with(new KotlinModule());
+		}
+
+		SchemaGeneratorConfig subtypeConfig = subtypeConfigBuilder.build();
 
 		SUBTYPE_SCHEMA_GENERATOR = new SchemaGenerator(subtypeConfig);
 	}
@@ -137,14 +145,10 @@ public final class McpJsonSchemaGenerator {
 
 		ObjectNode schema = JsonParser.getJsonMapper().createObjectNode();
 		schema.put("$schema", SchemaVersion.DRAFT_2020_12.getIdentifier());
-		schema.put("type", "object");
 
-		ObjectNode properties = schema.putObject("properties");
-		List<String> required = new ArrayList<>();
-
+		List<Integer> nonReservedParamIndexs = new ArrayList<>();
 		for (int i = 0; i < method.getParameterCount(); i++) {
 			Parameter parameter = method.getParameters()[i];
-			String parameterName = parameter.getName();
 			Type parameterType = method.getGenericParameterTypes()[i];
 
 			// Skip parameters annotated with @McpProgressToken
@@ -167,6 +171,28 @@ public final class McpJsonSchemaGenerator {
 							|| ClassUtils.isAssignable(CallToolRequest.class, parameterClass))) {
 				continue;
 			}
+			nonReservedParamIndexs.add(i);
+		}
+		if (nonReservedParamIndexs.size() == 1) {
+			Integer index = nonReservedParamIndexs.get(0);
+			Type parameterType = method.getGenericParameterTypes()[index];
+			ObjectNode parameterNode = SUBTYPE_SCHEMA_GENERATOR.generateSchema(parameterType);
+			if(parameterNode.hasNonNull("properties")) {
+				schema.setAll(parameterNode);
+				return schema.toPrettyString();
+			}
+		}
+
+		schema.put("type", "object");
+
+		ObjectNode properties = schema.putObject("properties");
+		List<String> required = new ArrayList<>();
+
+		for (int i = 0; i < nonReservedParamIndexs.size(); i++) {
+			Integer index = nonReservedParamIndexs.get(i);
+			Parameter parameter = method.getParameters()[index];
+			String parameterName = parameter.getName();
+			Type parameterType = method.getGenericParameterTypes()[index];
 
 			if (isMethodParameterRequired(method, i)) {
 				required.add(parameterName);
